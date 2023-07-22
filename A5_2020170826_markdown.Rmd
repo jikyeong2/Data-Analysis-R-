@@ -1,0 +1,473 @@
+---
+title: "The Analysis of Student's Academic Performace with xAPI-Edu-Data"
+author: "Min Kyeong, Choi, 2020170826" 
+date: '2020-12-29'
+output:
+  html_notebook: default
+  html_document: default
+  pdf_document: default
+---
+
+This Data set is from [Kaggle](https://www.kaggle.com/aljarah/xAPI-Edu-Data).
+The data shows the Academic Performance of student in different features. 
+
+> ### **Used Attributes**
+> - ###### **Gender**: Student's gender(nominal:Male = M, Female = F)
+> - ###### **Nationality**: Student's nationality(nominal:'Kuwait’,’ Lebanon’,’ Egypt’,’ SaudiArabia’,’ USA’,’ Jordan’,'Venezuela’, 'Iran’,'unis’,’ Morocco’,’ Syria’,’ Palestine’,’ Iraq’,’ Lybia’)
+> - ###### **Educational Stages(StageID)**: educational level student belongs(nominal:'lowerlevel','MiddleSchool,'HighSchool)
+> - ###### **Grade Levels**:Grade student belongs (nominal: ‘G-01’, ‘G-02’, ‘G-03’, ‘G-04’, ‘G-05’, ‘G-06’, ‘G-07’, ‘G-08’, ‘G-09’, ‘G-10’, ‘G-11’, ‘G-12 ‘)
+> - ###### **Topic**:Course topic (nominal:’ English’,’ Spanish’, ‘French’,’ Arabic’,’ IT’,’ Math’,’ Chemistry’, ‘Biology’, ‘Science’,’ History’,’ Quran’,’ Geology’)
+> - ###### **Semester**:School year semester (nominal:’ First’,’ Second’)
+> - ###### **Raised hand**: How many times the student raises his/her hand on classroom (numeric:0-100)
+> - ###### **Visited resources**: How many times the student visits a course content(numeric:0-100)
+> - ###### **Viewing announcements**: How many times the student checks the new announcements(numeric:0-100)
+> - ###### **Discussion groups**: How many times the student participate on discussion groups (numeric:0-100)
+> - ###### **Parent School Satisfaction**: the Degree of parent satisfaction from school(nominal:’Yes’,’No’)
+> - ###### **Student Absence Days**: the number of absence days for each student (nominal: above-7, under-7)
+> - ###### **Level of Students**: Low-Level: interval includes values from 0 to 69, Middle-Level: interval includes values from 70 to 89, High-Level: interval includes values from 90-100(nominal: 'H','M','L')
+
+```{r, eval=T, echo=T}
+require(dplyr)
+require(ggplot2)
+require(XML)
+require(reshape2)
+require(plyr)
+require(forecast)
+require(ggpubr)
+require(scales)
+require(ggrepel)
+require(Hmisc)
+```
+
+```{r load-packages, include=FALSE, eval=T, echo=T}
+require(dplyr)
+require(magrittr)
+require(knitr)
+```
+
+```{r}
+education<-read.csv("/Users/apple/Downloads/xAPI-Edu-Data.csv",stringsAsFactors = FALSE, header = TRUE )
+```
+
+Desciption of **education** dataset
+
+```{r, eval=T, echo=T}
+head(education)
+str(education)
+```
+```{r, eval=T, echo=T}
+nrow(education)
+ncol(education)
+colnames(education)
+```
+### Analysing the Data Set with Chart
+
+
+
+#### **1. Identifying the Percentage of Population by Gender with Pie Chart**
+
+```{r, eval=T, echo=T}
+numM <- education %>% filter(gender == "M") %>% nrow()
+numF <- education %>% filter(gender == "F") %>% nrow()
+pop <- data.frame(
+  Gender=c("Male","Female"),
+  value=c(numM,numF)
+)
+```
+
+```{r, eval=T, echo=T}
+population<-ggplot(pop,aes(x="",y=value,fill=Gender))+
+  geom_bar(stat="identity",width = 1,color="white")+
+  geom_text(aes(label=paste(round(value/sum(value)*100,1),"%")),
+            position = position_stack(vjust = 0.5))+
+  labs(title = "Percentage of Gender")+
+  coord_polar("y",start = 0)+
+  theme_void()
+population
+```
+
+
+> ##### The (#1) Pie chart shows that there is 63.5% of Male and 36.5% of Female, which means there are more Male student then that of Female.
+
+
+
+#### **2. Identifying the Number of Stage ID by Donut Chart**
+
+```{r, eval=T, echo=T}
+Stage<-sort(table(education$StageID), decreasing = TRUE)
+StageID<-data.frame(Stage)
+StageID$fraction = StageID$Freq/sum(StageID$Freq)
+StageID$ymax = cumsum(StageID$fraction)
+StageID$ymin = c(0, head(StageID$ymax, n=-1))
+StageID$labelPosition<-(StageID$ymax + StageID$ymin)/2
+StageID$label<-paste0(StageID$Var1, "\n value:", StageID$Freq)
+ggplot(StageID, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=Var1))+
+  geom_rect()+
+  labs(title="Number of Students in each Stage ID")+
+  geom_label(x=3.5, aes(y=labelPosition, label=label, size=10))+
+  scale_fill_brewer(palette=4)+
+  coord_polar(theta = "y")+
+  xlim(c(2,4))+
+  theme_void()+
+  theme(legend.position = "none")
+```
+
+
+> ##### The (#2) Donut chart shows the number of Students in each StageID.The data indicates that there are 199 students in lower level, 248 students in middle School, 33 students in high school.
+
+
+
+#### **3.Identifying Nationality of Students by Bar Chart & Estimate the Number of Students by their Nationality and Gender**
+
+```{r, eval=T, echo=T}
+
+theme_set(theme_classic()) #set theme
+
+Nation <- ggplot(education, aes(NationalITy)) 
+Nation + geom_bar(aes(fill=gender), width = 0.5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Number of Students Depending on Nationality", 
+       subtitle="by Gender",
+       x = "Nationality",
+       y = "Number of Students")+
+  coord_cartesian(ylim=c(0,200))
+```
+
+
+> ##### The (#3) Bar chart shows the number of Students depending on their nationality mentioned in data set. The legend shows the ratio of male/female students in each category.
+
+
+
+#### **4. How Many Students Raised Hands/Discussed/Viewed Announcements/Visited Resources in Each Interval by Histogram**
+```{r, eval=T, echo=T}
+a1<-ggplot(education, aes(x = raisedhands))+geom_histogram(fill="skyblue", color = "black")+
+  scale_x_continuous(breaks = seq(0,100,5))+
+  labs(title="Number of Student in each interval of Raised Hands",
+       x = "Frequency of Raised Hand",
+       y = "Number of Students")
+
+a1
+
+a2<-ggplot(education, aes(x = Discussion))+geom_histogram(fill="lightgreen", color = "black")+
+  scale_x_continuous(breaks = seq(0,100,5))+
+  labs(title="Number of Student in each interval of Discussion",
+       x = "Frequency of Discussion",
+       y = "Number of Students")
+
+a2
+
+a3<-ggplot(education, aes(x = AnnouncementsView))+geom_histogram(fill="skyblue", color = "black")+
+  scale_x_continuous(breaks = seq(0,100,5))+
+  labs(title="Number of Student in each interval of Announcements View",
+       x = "Frequency of AnnouncementsView",
+       y = "Number of Students")
+a3
+
+a4<-ggplot(education, aes(x = VisITedResources))+geom_histogram(fill="lightgreen", color = "black")+
+  scale_x_continuous(breaks = seq(0,100,5))+
+  labs(title="Number of Student in each interval of Visited Resources",
+       x = "Frequency of Visited Resources",
+       y = "Number of Students")
+
+a4
+```
+
+
+> ##### The (#4) Histogram shows the relaionship between number of students and frequency of Raised Hands/Discussed/Viewed Announcements/Visited Resources.
+
+
+
+```{r, eval=T, echo=T}
+
+Comparisonfigure1<-ggarrange(a1,a2,a3,a4,
+                             labels=c("A","B","C","D"),
+                             ncol =2, nrow = 2)
+Comparisonfigure1
+```
+
+
+> ##### Merging following histograms makes us easy to identify the information in short time.
+
+
+
+#### **5. Identifying the Number of Subject that Students Take and Estimate Student's Level by Bar Chart**
+
+```{r, eval=T, echo=T}
+theme_set(theme_get())#set theme
+
+Subject <- ggplot(education, aes(Topic)) 
+Subject + geom_bar(aes(fill=Class), width = 0.5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Topic that Students Attend", 
+       subtitle="arranged by Class",
+       x = "Topic",
+       y = "Number of Students")+
+  coord_cartesian(ylim=c(0,100))
+```
+
+
+> ##### The (#5) Bar chart indicates how many students attend each topic with each level of class. From the data, we can see that IT, French, and Arabic are the top 3 topic that students attend the most.
+
+
+
+#### **6.Violin Plot on Top3 Topic**
+
+```{r, eval=T, echo=T}
+
+theme_set(theme_bw())
+Topsubject<-education %>% select(Topic,VisITedResources) %>% 
+  filter(Topic == "IT" | Topic == "French" | Topic =="Arabic")
+Topsubject<-ggplot(Topsubject, aes(Topic, VisITedResources, fill=Topic))
+Topsubject + geom_violin(trim = FALSE)+
+  stat_summary(fun.data = mean_sdl, geom="pointrange", color="red")+
+  labs(title = "The Visited Resources of Top 3 Topic",
+       subtitle = "Arabic, French, IT",
+       x = "Subject",
+       y = "Frequency of Visited Resources")
+```
+
+
+> ##### Violin plots are similar to box plots. It shows the distribution of data. This (#6) Violin plot shows the relationship between Top 3 Topic and their frequency of visited Resources. The function mean_sdl computes the mean plus or minus a constant times the standard deviation. Thus, the plot shows both mean and its standard deviation. 
+
+
+
+
+#### **7. The Relationship Between Raised Hands and Gender with Density Plot**
+```{r, eval=T, echo=T}
+
+density1<-ggplot(education, aes(raisedhands, color=gender))+
+  geom_density()+
+  labs(title="The Relationship between Raised Hands and Gender",
+       x = "Frequency of Raised Hands")
+density1
+```
+
+
+> ##### The (#7) Density plot shows the relationship between frequency of Raised Hands and Gender. The plot indicates that the female's density is highest at the point where frequency of Raised Hands is about 75. Plus, male's density is highest at the point where that is between 0 and 25. 
+
+
+
+#### **8. The Relationship Between Raised Hands and Topic with Density Plot**
+
+```{r, eval=T, echo=T}
+
+density2<-ggplot(education, aes(raisedhands, color=Topic))+
+  geom_density()+
+  labs(title="The Relationship between Raised Hands and Topic",
+       x = "Frequency of Raised Hands")
+density2
+```
+
+
+> ##### The (#8) Density plot shows the relationship between frequency of Raised Hands and Topic. The plot shows that Geology has the highest density at the point where frequency of Raised Hands is between 75 and 100.
+
+
+
+#### **9.Identify the Activeness of Students in Class time Depending on Their Level of Class**
+
+```{r, eval=T, echo=T}
+#Relation with raised hands
+theme_set(theme_bw())
+b<-ggplot(education, aes(x=Class, y=raisedhands))
+b1<-b +geom_boxplot(varwidth = T, fill = "plum")+
+  stat_summary(fun = mean, geom = "point", shape=20, size=3, 
+               color="red",fill="red")+
+  theme(legend.position="none")+
+  scale_fill_brewer(palette="Set1")+
+  labs(title = "The Relaionship between the Number of Raised hands and Class",
+       subtitle = "by Class ",
+       x = "Class",
+       y = "Number of Raisedhands")+
+  scale_y_continuous(breaks = seq(0,100,10))
+b1
+
+#Relation with Visited Resources
+b<-ggplot(education, aes(x=Class, y=VisITedResources))
+b2<-b +geom_boxplot(varwidth = T, fill = "skyblue")+
+  stat_summary(fun = mean, geom = "point", shape=20, size=3, 
+               color="red",fill="red")+
+  theme(legend.position="none")+
+  scale_fill_brewer(palette="Set1")+
+  labs(title = "The Relaionship between the Number of Visited Resources and Class",
+       x = "Class",
+       y = "Number of Visited Resources")+
+  scale_y_continuous(breaks = seq(0,100,10))
+b2
+
+#Relation with Discussion
+b<-ggplot(education, aes(x=Class, y=Discussion))
+b3<-b +geom_boxplot(varwidth = T, fill = "lightgreen")+
+  stat_summary(fun = mean, geom = "point", shape=20, size=3, 
+               color="red",fill="red")+
+  theme(legend.position="none")+
+  scale_fill_brewer(palette="Set1")+
+  labs(title = "The Relaionship between the Number of Discussion and Class",
+       x = "Class",
+       y = "Number of Discussion")+
+  scale_y_continuous(breaks = seq(0,100,10)) 
+b3
+
+#Relation with Announcements View Review
+b<-ggplot(education, aes(x=Class, y=AnnouncementsView))
+b4<-b +geom_boxplot(varwidth = T, fill = "orange")+
+  stat_summary(fun = mean, geom = "point", shape=20, size=3, 
+               color="red",fill="red")+
+  theme(legend.position="none")+
+  scale_fill_brewer(palette="Set1")+
+  labs(title = "The Relaionship between the Number of Announcements View and Class",
+       x = "Class",
+       y = "Number of AnnouncementsView")+
+  scale_y_continuous(breaks = seq(0,100,10)) 
+b4
+
+```
+
+
+> ##### Each (#9) Boxplot shows the activeness of students in academy depending on their level of class. Frequency of Raised Hands, Visited Resources, Discussion and Announcement View shows the activiness of students. Each boxplot shows the median, maximum, minimum, outliers. The red dot on boxplot is the mean of each category. 
+
+```{r, eval=T, echo=T}
+
+#Combine
+Comparisonfigure2<-ggarrange(b1,b2,b3,b4,
+                  labels=c("A","B","C","D"),
+                  ncol =2, nrow = 2)
+Comparisonfigure2
+```
+
+
+> ##### Merging following boxplots helps use to see the trend of data. Indeed, the high class has the most frequency in each section. 
+
+
+
+#### **10. The Relationship Between Raised Hands and Discussion by Comparing Each Stage ID and Student Absence Days**
+
+```{r, eval=T, echo=T}
+
+theme_set(theme_bw())
+line1<-ggplot(education, aes(raisedhands,Discussion))+
+  labs(title = "The Relationship between Raised Hands and Discussion",
+       subtitle = "in Each StageID",
+       x = "Frequency of Raised Hand",
+       y = "Frequency of Discussion")
+line1 + geom_smooth(aes(col=StageID), method="lm", se=F)
+
+line2<-ggplot(education, aes(raisedhands,Discussion))+
+  labs(title = "The Relationship between Raised Hands and Discussion",
+       subtitle = "in Each Student Absence Days",
+       x = "Frequency of Raised Hand",
+       y = "Frequency of Discussion")
+line2 + geom_smooth(aes(col=StudentAbsenceDays), method="lm", se=F)
+```
+
+
+> ##### The (#10) first line graph represents the relationship between frequency of raised hands and discussion in each stageID. It tell us that as slope of all lines are increasing which means students who discusses more, raises hands more. The (#10) second line graph represents the same relationship with previous graph in each student absence days. This tell us that students who attend the school more, perform well in school.  
+
+
+
+#### **11. Parent's Satisfaction to School**
+
+```{r, eval=T, echo=T}
+
+Good<-education %>% filter(ParentschoolSatisfaction == "Good") %>% nrow()
+Bad<-education %>% filter(ParentschoolSatisfaction == "Bad") %>% nrow()
+Satisfaction<-data.frame(count = c(Good, Bad),
+                         Satis = c("Good","Bad"))
+theme_set(theme_bw())                         
+ggplot(Satisfaction, aes(x=Satis,y=count))+
+  geom_point(size = 5, color ="red", fill=alpha("orange", 0.3),
+             alpha = 0.7, shape=21, stroke=2)+
+  geom_segment(aes(x=Satis, xend=Satis,
+                   y = 0,
+                   yend = count))+
+  labs(title="Parent's Satisfaction to School",
+       subtitle = "with Lollipop plot",
+       x = "Satisfaction",
+       y ="Count")
+```
+
+
+> ##### The (#11) lollipop plot shows how many parents are satisfied with school or not. The plot represents that there are more parents who are satisfied with school then who are not. 
+
+
+
+#### **12. Parent's Satisfaction to School Depending on Class**
+
+```{r, eval=T, echo=T}
+HGood<-education %>% select(ParentschoolSatisfaction,Class) %>% 
+  filter(ParentschoolSatisfaction == "Good"&Class == "H") %>% nrow()
+HBad<-education %>% select(ParentschoolSatisfaction,Class) %>% 
+  filter(ParentschoolSatisfaction == "Bad"&Class == "H") %>% nrow()
+MGood<-education %>%select(ParentschoolSatisfaction,Class) %>% 
+  filter(ParentschoolSatisfaction == "Good"&Class == "M") %>% nrow()
+MBad<-education %>%select(ParentschoolSatisfaction,Class) %>% 
+  filter(ParentschoolSatisfaction == "Bad"&Class == "M") %>% nrow()
+LGood<-education %>%select(ParentschoolSatisfaction,Class) %>% 
+  filter(ParentschoolSatisfaction == "Good"&Class == "L") %>% nrow()
+LBad<-education %>%select(ParentschoolSatisfaction,Class) %>% 
+  filter(ParentschoolSatisfaction == "Bad"&Class == "L") %>% nrow()
+
+SatisfactionbyClass<-data.frame(Class = c("H", "M", "L"),
+                                Bads = c(HBad, MBad, LBad),
+                                Goods = c(HGood, MGood, LGood))
+#The change of Goods in Class
+H.S.G<-education %>%
+  filter(ParentschoolSatisfaction == "Good"&Class == "H"&Semester=="S") %>% nrow()
+H.F.G<-education %>%
+  filter(ParentschoolSatisfaction == "Good"&Class == "H"&Semester=="F") %>% nrow()
+M.S.G<-education %>%
+  filter(ParentschoolSatisfaction == "Good"&Class == "M"&Semester=="S") %>% nrow()
+M.F.G<-education %>%
+  filter(ParentschoolSatisfaction == "Good"&Class == "M"&Semester=="F") %>% nrow()
+L.S.G<-education %>%
+  filter(ParentschoolSatisfaction == "Good"&Class == "L"&Semester=="S") %>% nrow()
+L.F.G<-education %>%
+  filter(ParentschoolSatisfaction == "Good"&Class == "L"&Semester=="F") %>% nrow()
+GoodsChange<-data.frame(class=c("H","H","M","M","L","L"),
+                        Semester=c("S","F","S","F","S","F"),
+                        Number=c(H.S.G,H.F.G,M.S.G,M.F.G,L.S.G,L.F.G))
+GSatisfaction<-ggplot(GoodsChange,aes(x=Semester, y=Number, group=class))+
+  geom_line(aes(color=class), size =2)+
+  geom_point(aes(color=class), size = 4)+
+  labs(title = "Satisfaction Change between
+       Semester in Each Class",
+       subtitle = "Satisfaction: Good",
+       y="Number of Parents Satisfied with School")
+
+#The change of Bads in Class
+H.S.B<-education %>%
+  filter(ParentschoolSatisfaction == "Bad"&Class == "H"&Semester=="S") %>% nrow()
+H.F.B<-education %>%
+  filter(ParentschoolSatisfaction == "Bad"&Class == "H"&Semester=="F") %>% nrow()
+M.S.B<-education %>%
+  filter(ParentschoolSatisfaction == "Bad"&Class == "M"&Semester=="S") %>% nrow()
+M.F.B<-education %>%
+  filter(ParentschoolSatisfaction == "Bad"&Class == "M"&Semester=="F") %>% nrow()
+L.S.B<-education %>%
+  filter(ParentschoolSatisfaction == "Bad"&Class == "L"&Semester=="S") %>% nrow()
+L.F.B<-education %>%
+  filter(ParentschoolSatisfaction == "Bad"&Class == "L"&Semester=="F") %>% nrow()
+BadsChange<-data.frame(class=c("H","H","M","M","L","L"),
+                        Semester=c("S","F","S","F","S","F"),
+                        Number=c(H.S.B,H.F.B,M.S.B,M.F.B,L.S.B,L.F.B))
+
+BSatisfaction<-ggplot(BadsChange,aes(x=Semester, y=Number, group=class))+
+  geom_line(aes(color=class), size =2)+
+  geom_point(aes(color=class), size = 4)+
+  labs(title = "Satisfaction Change between 
+       Semester in Each Class",
+       subtitle = "Satisfaction: Bad",
+       y="Number of Parents Unsatisfied with School")
+
+Comparisonfigure3<-ggarrange(GSatisfaction,BSatisfaction,
+                             labels=c("A","B"),
+                             ncol =2, nrow = 1)
+Comparisonfigure3
+
+```
+
+
+> ##### The (#12) slope chart shows the change in parent's satisfaction in each class.                             The number of parents who are satisfied with school decreased in class M and L. On the other hand, that increased in class H. The number of parents who  are unsatisfied with school increased in class H and L. On the other hand, that decreased in class L. 
+
+### Conclusion
+> ##### Content: Analysis of Student's Academic Performace with xAPI-Edu-Data
+> ##### Used ggplot: Pie chart, Donut chart, Bar chart, Histogram, Violin plot, Density plot, Box plot, line plot, lollipop plot, slope chart
